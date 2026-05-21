@@ -1,155 +1,120 @@
 require('dotenv').config();
 const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const cors = require('cors');
 
-const app = express();
+const Producto = require('./models/Producto');
+const Usuario = require('./models/Usuario');
+const Movimiento = require('./models/Movimiento');
 
-// Middlewares
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Base de datos en memoria (para pruebas, no necesita MongoDB)
-let productos = [];
-let usuarios = [];
-let movimientos = [];
-let nextId = 1;
-
-// ========== RUTAS DE AUTENTICACIÓN ==========
-app.post('/api/auth/register', (req, res) => {
-  const { username, password } = req.body;
-  console.log('Registro usuario:', username);
-  
-  const existe = usuarios.find(u => u.username === username);
-  if (existe) {
-    return res.status(400).json({ error: 'El usuario ya existe' });
+// Middleware para autenticación
+const auth = (req, res, next) => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Acceso denegado' });
+  try {
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    req.usuario = verified;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Token inválido' });
   }
-  
-  usuarios.push({ id: nextId++, username, password });
-  res.json({ mensaje: 'Usuario creado exitosamente' });
+};
+
+// ==================== RUTAS ====================
+
+// Registrar usuario
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const hashed = await bcrypt.hash(password, 10);
+    const usuario = new Usuario({ username, password: hashed });
+    await usuario.save();
+    res.json({ mensaje: 'Usuario creado exitosamente' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
-  console.log('Login usuario:', username);
-  
-  const usuario = usuarios.find(u => u.username === username && u.password === password);
-  if (!usuario) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const usuario = await Usuario.findOne({ username });
+    if (!usuario) return res.status(401).json({ error: 'Credenciales inválidas' });
+    const valido = await bcrypt.compare(password, usuario.password);
+    if (!valido) return res.status(401).json({ error: 'Credenciales inválidas' });
+    const token = jwt.sign({ id: usuario._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, usuario: { id: usuario._id, username: usuario.username } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-  
-  // Token simple (para pruebas)
-  const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');
-  res.json({ token, usuario: { id: usuario.id, username: usuario.username } });
 });
 
-// ========== RUTAS DE PRODUCTOS ==========
-app.get('/api/productos', (req, res) => {
-  console.log('GET productos - Cantidad:', productos.length);
+// CRUD Productos (protegido)
+app.get('/api/productos', auth, async (req, res) => {
+  const productos = await Producto.find().sort({ createdAt: -1 });
   res.json(productos);
 });
 
-app.post('/api/productos', (req, res) => {
+app.post('/api/productos', auth, async (req, res) => {
   const { nombre, precio, stock } = req.body;
-  console.log('POST producto:', { nombre, precio, stock });
-  
-  if (!nombre) {
-    return res.status(400).json({ error: 'El nombre es obligatorio' });
-  }
-  
-  const nuevoProducto = {
-    _id: String(nextId++),
-    nombre,
-    precio: precio || 0,
-    stock: stock || 0,
-    createdAt: new Date().toISOString()
-  };
-  
-  productos.push(nuevoProducto);
-  console.log('Producto creado:', nuevoProducto);
-  res.status(201).json(nuevoProducto);
+  if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio' });
+  const producto = new Producto({ nombre, precio, stock });
+  await producto.save();
+  res.status(201).json(producto);
 });
 
-app.put('/api/productos/:id', (req, res) => {
+app.put('/api/productos/:id', auth, async (req, res) => {
   const { id } = req.params;
-  const { nombre, precio, stock } = req.body;
-  console.log('PUT producto:', id);
-  
-  const index = productos.findIndex(p => p._id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Producto no encontrado' });
-  }
-  
-  productos[index] = { ...productos[index], nombre, precio, stock };
-  res.json(productos[index]);
+  const producto = await Producto.findByIdAndUpdate(id, req.body, { new: true });
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
+  res.json(producto);
 });
 
-app.delete('/api/productos/:id', (req, res) => {
+app.delete('/api/productos/:id', auth, async (req, res) => {
   const { id } = req.params;
-  console.log('DELETE producto:', id);
-  
-  const index = productos.findIndex(p => p._id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Producto no encontrado' });
-  }
-  
-  productos.splice(index, 1);
+  const producto = await Producto.findByIdAndDelete(id);
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
   res.json({ mensaje: 'Producto eliminado' });
 });
 
-// ========== RUTAS DE MOVIMIENTOS ==========
-app.get('/api/movimientos', (req, res) => {
-  console.log('GET movimientos - Cantidad:', movimientos.length);
+// Movimientos
+app.get('/api/movimientos', auth, async (req, res) => {
+  const movimientos = await Movimiento.find().populate('productoId', 'nombre').sort({ fecha: -1 });
   res.json(movimientos);
 });
 
-app.post('/api/movimientos', (req, res) => {
+app.post('/api/movimientos', auth, async (req, res) => {
   const { productoId, tipo, cantidad } = req.body;
-  console.log('POST movimiento:', { productoId, tipo, cantidad });
-  
-  const producto = productos.find(p => p._id === productoId);
-  if (!producto) {
-    return res.status(404).json({ error: 'Producto no encontrado' });
-  }
-  
+  const producto = await Producto.findById(productoId);
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
   if (tipo === 'salida' && producto.stock < cantidad) {
     return res.status(400).json({ error: 'Stock insuficiente' });
   }
-  
-  if (tipo === 'entrada') {
-    producto.stock += cantidad;
-  } else {
-    producto.stock -= cantidad;
-  }
-  
-  const movimiento = {
-    _id: String(nextId++),
-    productoId,
-    tipo,
-    cantidad,
-    fecha: new Date().toISOString()
-  };
-  
-  movimientos.push(movimiento);
+  if (tipo === 'entrada') producto.stock += cantidad;
+  else producto.stock -= cantidad;
+  await producto.save();
+  const movimiento = new Movimiento({ productoId, tipo, cantidad });
+  await movimiento.save();
   res.status(201).json({ movimiento, stockActual: producto.stock });
 });
 
-// ========== RUTA DE PRUEBA ==========
+// Ruta raíz
 app.get('/', (req, res) => {
-  res.json({ mensaje: 'API CaribeStock funcionando' });
+  res.json({ mensaje: 'API CaribeStock funcionando con MongoDB' });
 });
 
-// ========== INICIAR SERVIDOR ==========
+// Conectar a MongoDB y arrancar
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌐 Servidor corriendo en http://localhost:${PORT}`);
-  console.log('✅ Backend listo para recibir peticiones');
-  console.log('📋 Endpoints disponibles:');
-  console.log('   POST   /api/auth/login');
-  console.log('   POST   /api/auth/register');
-  console.log('   GET    /api/productos');
-  console.log('   POST   /api/productos');
-  console.log('   PUT    /api/productos/:id');
-  console.log('   DELETE /api/productos/:id');
-  console.log('   GET    /api/movimientos');
-  console.log('   POST   /api/movimientos');
-});
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('✅ Conectado a MongoDB Atlas');
+    app.listen(PORT, () => console.log(`🌐 Servidor en puerto ${PORT}`));
+  })
+  .catch(err => console.error('❌ Error de conexión:', err));
