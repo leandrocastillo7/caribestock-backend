@@ -5,10 +5,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 
-throw new Error("PRUEBA LEANDRO 2026");
-
-console.log("🔥 PRUEBA LEANDRO 2026 🔥");
-
 const Producto = require('./models/Producto');
 const Usuario = require('./models/Usuario');
 const Movimiento = require('./models/Movimiento');
