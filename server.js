@@ -5,10 +5,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 
-const Producto = require('./models/Producto');
-const Usuario = require('./models/Usuario');
-const Movimiento = require('./models/Movimiento');
+const axios = require('axios');
 
+const Producto = require('./src/models/producto');
+const Usuario = require('./src/models/usuario');
+const Movimiento = require('./src/models/movimiento');
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -100,9 +101,46 @@ app.post('/api/movimientos', auth, async (req, res) => {
   if (tipo === 'entrada') producto.stock += cantidad;
   else producto.stock -= cantidad;
   await producto.save();
-  const movimiento = new Movimiento({ productoId, tipo, cantidad });
-  await movimiento.save();
-  res.status(201).json({ movimiento, stockActual: producto.stock });
+ const movimiento = new Movimiento({
+  productoId,
+  tipo,
+  cantidad
+});
+
+await movimiento.save();
+
+try {
+
+  const mensaje =
+`📦 IDEAS LAB
+
+Movimiento registrado
+
+Producto: ${producto.nombre}
+
+Tipo: ${tipo}
+
+Cantidad: ${cantidad}
+
+Stock actual: ${producto.stock}`;
+
+  await axios.get(
+    `https://api.callmebot.com/whatsapp.php?phone=573505152857&text=${encodeURIComponent(mensaje)}&apikey=7886122`
+  );
+
+  console.log('✅ WhatsApp enviado');
+
+} catch (error) {
+
+  console.log('❌ Error enviando WhatsApp');
+
+}
+
+res.status(201).json({
+  movimiento,
+  stockActual: producto.stock
+});
+
 });
 
 // Ruta raíz
