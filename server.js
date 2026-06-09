@@ -7,9 +7,9 @@ const cors = require('cors');
 
 const axios = require('axios');
 
-const Producto = require('./src/models/producto');
-const Usuario = require('./src/models/usuario');
-const Movimiento = require('./src/models/movimiento');
+const Producto = require('./models/Producto');
+const Usuario = require('./models/Usuario');
+const Movimiento = require('./models/Movimiento');
 const app = express();
 app.use(cors());
 app.use(express.json());
